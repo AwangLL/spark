@@ -18,11 +18,37 @@
 package org.apache.spark.sql.catalyst.plans.logical.statsEstimation
 
 import org.apache.spark.sql.catalyst.plans.logical._
+import org.apache.spark.sql.catalyst.plans.logical.myStatsEstimation.QueryData
 
 /**
  * A trait to add statistics propagation to [[LogicalPlan]].
  */
 trait LogicalPlanStats { self: LogicalPlan =>
+
+  protected var queryCache: Option[QueryData] = None
+
+  def queryData: QueryData = queryCache.getOrElse {
+    val tQuery = new QueryData
+    self match {
+      case p: Filter =>
+        tQuery.init(p)
+        queryCache = Option(tQuery)
+      case p: Project =>
+        tQuery.init(p)
+        queryCache = Option(tQuery)
+      case p: Join =>
+        tQuery.init(p)
+        queryCache = Option(tQuery)
+//      case p: LeafNode =>
+//        if (p.nodeName == "LogicalQueryStage") {
+//          queryCache = Option(p.getLogicalPlan().queryData)
+//        }
+//        else throw new RuntimeException("Unsupported plan type: " + self.nodeName)
+      case _ =>
+        throw new RuntimeException("Unsupported plan type: " + self.nodeName)
+    }
+    queryCache.get
+  }
 
   /**
    * Returns the estimated statistics for the current logical plan node. Under the hood, this
@@ -32,7 +58,12 @@ trait LogicalPlanStats { self: LogicalPlan =>
    */
   def stats: Statistics = statsCache.getOrElse {
     if (conf.cboEnabled) {
-      statsCache = Option(BasicStatsPlanVisitor.visit(self))
+      if (conf.contains("spark.sql.mycbo.enabled") &&
+        conf.getConfString("spark.sql.mycbo.enabled") == "true") {
+        statsCache = Option(myStatsEstimation.BasicStatsPlanVisitor.visit(self))
+      } else {
+        statsCache = Option(statsEstimation.BasicStatsPlanVisitor.visit(self))
+      }
     } else {
       statsCache = Option(SizeInBytesOnlyStatsPlanVisitor.visit(self))
     }
